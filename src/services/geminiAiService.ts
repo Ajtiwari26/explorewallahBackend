@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import Package from '../models/Package';
+import Package, { IPackage, IBatchDeparture } from '../models/Package';
 
 export class GeminiAiService {
   private genAI: GoogleGenerativeAI | null = null;
@@ -14,20 +14,20 @@ export class GeminiAiService {
 
   async generateResponseForWhatsApp(customerQuery: string): Promise<string> {
     try {
-      const packages = await Package.find({ isActive: true }).select(
-        'title slug pricePerPerson discountedPrice durationDays difficulty baseLocation batches'
-      ).limit(10);
+      const packages = await Package.find({ isActive: true }).limit(10);
 
-      const packagesContext = packages.map((pkg) => ({
+      const packagesContext = packages.map((pkg: IPackage) => ({
         title: pkg.title,
         price: pkg.discountedPrice || pkg.pricePerPerson,
         duration: `${pkg.durationDays || 5} Days`,
         difficulty: pkg.difficulty || 'Moderate',
         baseLocation: pkg.baseLocation || 'Uttarakhand',
-        upcomingBatches: (pkg.batches || []).filter((b) => b.isOpen).map((b) => ({
-          startDate: b.startDate ? new Date(b.startDate).toISOString().split('T')[0] : '',
-          availableSeats: (b.totalSeats || 20) - (b.bookedSeats || 0),
-        })),
+        upcomingBatches: (pkg.batches || [])
+          .filter((b: IBatchDeparture) => b.isOpen)
+          .map((b: IBatchDeparture) => ({
+            startDate: b.startDate ? new Date(b.startDate).toISOString().split('T')[0] : '',
+            availableSeats: (b.totalSeats || 20) - (b.bookedSeats || 0),
+          })),
       }));
 
       const systemPrompt = `You are Explore Wallah's friendly, highly knowledgeable AI Travel Assistant responding on WhatsApp.
