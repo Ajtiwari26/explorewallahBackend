@@ -15,7 +15,7 @@ import webhookRoutes from './routes/webhookRoutes';
 dotenv.config();
 
 const app: Express = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
 
 app.use(cors({
   origin: '*',
@@ -40,6 +40,7 @@ app.use('/api/packages', packageRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/whatsapp/webhook', webhookRoutes); // Alias for Meta Developer Portal
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/webhooks', webhookRoutes);
 
@@ -57,10 +58,6 @@ wss.on('connection', (ws: WebSocket) => {
 
   ws.on('message', (message: string) => {
     console.log('[WebSocket] Received:', message.toString());
-  });
-
-  ws.on('close', () => {
-    console.log('[WebSocket] Client disconnected');
   });
 });
 
