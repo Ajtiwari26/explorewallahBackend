@@ -15,7 +15,7 @@ import webhookRoutes from './routes/webhookRoutes';
 dotenv.config();
 
 const app: Express = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
 
 app.use(cors({
   origin: '*',

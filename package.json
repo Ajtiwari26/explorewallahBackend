@@ -10,7 +10,8 @@
     "test:db": "tsx testscript/test_db_connection.ts",
     "test:auth": "tsx testscript/test_admin_auth.ts",
     "test:gemini": "tsx testscript/test_gemini_rag.ts",
-    "test:invoice": "tsx testscript/test_pdf_invoice.ts"
+    "test:invoice": "tsx testscript/test_pdf_invoice.ts",
+    "test:all": "tsx testscript/test_all_apis.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -21,6 +22,7 @@
     "@types/node": "^20.17.16",
     "@types/pdfkit": "^0.13.9",
     "@types/ws": "^8.5.14",
+    "@upstash/redis": "^1.38.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

@@ -1,9 +1,14 @@
 import { Router } from 'express';
+import {
+  handleRazorpayWebhook,
+  handleWhatsAppWebhook,
+  verifyWhatsAppWebhook,
+} from '../controllers/webhookController';
 
 const router = Router();
 
-router.post('/', (req, res) => {
-  res.json({ status: 'OK', received: true });
-});
+router.post('/razorpay', handleRazorpayWebhook);
+router.get('/whatsapp', verifyWhatsAppWebhook);
+router.post('/whatsapp', handleWhatsAppWebhook);
 
 export default router;
