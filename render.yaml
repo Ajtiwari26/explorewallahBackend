@@ -12,6 +12,10 @@ services:
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
-        value: explore_wallah_secret_jwt_key_2026
+        generateValue: true
       - key: JWT_REFRESH_SECRET
-        value: explore_wallah_refresh_secret_key_2026
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://explorewallah.com,https://www.explorewallah.com
+      - key: FIREBASE_PROJECT_ID
+        value: explorewallah-81762
