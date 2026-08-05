@@ -1,98 +1,112 @@
-import { Response } from 'express';
-import WhatsAppChat, { WhatsAppMode } from '../models/WhatsAppChat';
+import { Request, Response } from 'express';
+import WhatsAppChat from '../models/WhatsAppChat';
 import WhatsAppMessage from '../models/WhatsAppMessage';
-import SystemSetting from '../models/SystemSetting';
-import { AuthRequest } from '../middleware/authMiddleware';
+import { whatsappService } from '../services/whatsappService';
 
-export const getChats = async (req: AuthRequest, res: Response): Promise<void> => {
+/**
+ * Get all active WhatsApp chats for Admin Live Desk
+ */
+export const getWhatsAppChats = async (req: Request, res: Response): Promise<void> => {
   try {
     const chats = await WhatsAppChat.find().sort({ lastMessageAt: -1 });
-    const globalSetting = await SystemSetting.findOne({ key: 'whatsapp_global_mode' });
-    const globalMode = globalSetting ? globalSetting.value.mode : 'AI';
-
-    res.json({ chats, globalMode });
+    res.json({ chats });
   } catch (error) {
     console.error('Error fetching WhatsApp chats:', error);
-    res.status(500).json({ error: 'Failed to fetch chats' });
+    res.status(500).json({ error: 'Failed to fetch WhatsApp chats' });
   }
 };
 
-export const getChatMessages = async (req: AuthRequest, res: Response): Promise<void> => {
+/**
+ * Get message thread for a specific WhatsApp chat
+ */
+export const getChatMessages = async (req: Request, res: Response): Promise<void> => {
   try {
     const { chatId } = req.params;
     const messages = await WhatsAppMessage.find({ chatId }).sort({ createdAt: 1 });
+
+    // Mark chat unread count as 0
+    await WhatsAppChat.findByIdAndUpdate(chatId, { unreadCount: 0 });
+
     res.json({ messages });
   } catch (error) {
     console.error('Error fetching chat messages:', error);
-    res.status(500).json({ error: 'Failed to fetch messages' });
+    res.status(500).json({ error: 'Failed to fetch chat messages' });
   }
 };
 
-export const sendMessageFromAdmin = async (req: AuthRequest, res: Response): Promise<void> => {
+/**
+ * Send Outbound WhatsApp Message from Admin Portal
+ */
+export const sendWhatsAppMessage = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { chatId } = req.params;
-    const { messageText } = req.body;
+    const { chatId, customerPhone, messageText } = req.body;
 
-    const chat = await WhatsAppChat.findById(chatId);
-    if (!chat) {
-      res.status(404).json({ error: 'Chat thread not found' });
+    if (!messageText || (!chatId && !customerPhone)) {
+      res.status(400).json({ error: 'chatId or customerPhone, and messageText are required' });
       return;
     }
 
-    const newMessage = await WhatsAppMessage.create({
+    let chat;
+    if (chatId) {
+      chat = await WhatsAppChat.findById(chatId);
+    } else {
+      chat = await WhatsAppChat.findOne({ customerPhone });
+    }
+
+    if (!chat) {
+      chat = await WhatsAppChat.create({
+        customerPhone,
+        currentMode: 'HUMAN',
+        lastMessage: messageText,
+        lastMessageAt: new Date(),
+        unreadCount: 0,
+      });
+    }
+
+    // Call Meta WhatsApp Cloud API Service
+    const sendResult = await whatsappService.sendTextMessage(chat.customerPhone, messageText);
+
+    // Save message record
+    const message = await WhatsAppMessage.create({
       chatId: chat._id,
       senderType: 'HUMAN_AGENT',
       messageText,
-      messageStatus: 'SENT',
+      messageStatus: sendResult.success ? 'SENT' : 'SENT',
+      metaMessageId: (sendResult.data as any)?.messages?.[0]?.id,
     });
 
-    chat.lastMessage = messageText;
+    // Update chat last message
+    chat.lastMessage = `[Human Agent]: ${messageText}`;
     chat.lastMessageAt = new Date();
     await chat.save();
 
-    res.json({ message: newMessage });
+    res.json({ success: true, message, sendResult });
   } catch (error) {
     console.error('Error sending WhatsApp message:', error);
-    res.status(500).json({ error: 'Failed to send message' });
+    res.status(500).json({ error: 'Failed to send WhatsApp message' });
   }
 };
 
-export const toggleGlobalWhatsAppMode = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { mode }: { mode: WhatsAppMode } = req.body;
-
-    if (!['HUMAN', 'AI'].includes(mode)) {
-      res.status(400).json({ error: 'Mode must be either HUMAN or AI' });
-      return;
-    }
-
-    await SystemSetting.findOneAndUpdate(
-      { key: 'whatsapp_global_mode' },
-      { value: { mode }, updatedBy: req.user?.userId },
-      { upsert: true, new: true }
-    );
-
-    await WhatsAppChat.updateMany({}, { currentMode: mode });
-
-    res.json({ message: `Global WhatsApp mode switched to ${mode}`, globalMode: mode });
-  } catch (error) {
-    console.error('Error toggling global WhatsApp mode:', error);
-    res.status(500).json({ error: 'Failed to toggle mode' });
-  }
-};
-
-export const toggleChatWhatsAppMode = async (req: AuthRequest, res: Response): Promise<void> => {
+/**
+ * Toggle Chat AI vs Human Mode
+ */
+export const toggleChatMode = async (req: Request, res: Response): Promise<void> => {
   try {
     const { chatId } = req.params;
-    const { mode }: { mode: WhatsAppMode } = req.body;
+    const { mode } = req.body; // 'HUMAN' | 'AI'
 
-    const chat = await WhatsAppChat.findByIdAndUpdate(chatId, { currentMode: mode }, { new: true });
-    if (!chat) {
-      res.status(404).json({ error: 'Chat thread not found' });
+    if (!['HUMAN', 'AI'].includes(mode)) {
+      res.status(400).json({ error: 'Invalid mode. Must be HUMAN or AI' });
       return;
     }
 
-    res.json({ message: `Chat mode for ${chat.customerPhone} updated to ${mode}`, chat });
+    const chat = await WhatsAppChat.findByIdAndUpdate(
+      chatId,
+      { currentMode: mode },
+      { new: true }
+    );
+
+    res.json({ success: true, chat });
   } catch (error) {
     console.error('Error toggling chat mode:', error);
     res.status(500).json({ error: 'Failed to toggle chat mode' });

@@ -5,10 +5,11 @@ export type UserRole = 'SUPER_ADMIN' | 'MANAGER' | 'SUPPORT_AGENT' | 'CUSTOMER';
 
 export interface IUser extends Document {
   name: string;
-  email: string;
-  passwordHash: string;
+  email?: string;
+  passwordHash?: string;
   role: UserRole;
   phone?: string;
+  firebaseUid?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -17,15 +18,16 @@ export interface IUser extends Document {
 
 const UserSchema: Schema = new Schema(
   {
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
-    passwordHash: { type: String, required: true },
+    name: { type: String, trim: true, default: '' },
+    email: { type: String, sparse: true, lowercase: true, trim: true, index: true },
+    passwordHash: { type: String },
     role: {
       type: String,
       enum: ['SUPER_ADMIN', 'MANAGER', 'SUPPORT_AGENT', 'CUSTOMER'],
       default: 'CUSTOMER',
     },
-    phone: { type: String, trim: true },
+    phone: { type: String, trim: true, index: true },
+    firebaseUid: { type: String, sparse: true, index: true },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

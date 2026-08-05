@@ -1,20 +1,16 @@
 import { Router } from 'express';
 import {
-  getChats,
+  getWhatsAppChats,
   getChatMessages,
-  sendMessageFromAdmin,
-  toggleGlobalWhatsAppMode,
-  toggleChatWhatsAppMode,
+  sendWhatsAppMessage,
+  toggleChatMode,
 } from '../controllers/whatsappController';
-import { authenticateToken, requireRole } from '../middleware/authMiddleware';
 
 const router = Router();
 
-router.get('/chats', authenticateToken, requireRole(['SUPER_ADMIN', 'MANAGER', 'SUPPORT_AGENT', 'admin']), getChats);
-router.get('/chats/:chatId/messages', authenticateToken, requireRole(['SUPER_ADMIN', 'MANAGER', 'SUPPORT_AGENT', 'admin']), getChatMessages);
-router.post('/chats/:chatId/send', authenticateToken, requireRole(['SUPER_ADMIN', 'MANAGER', 'SUPPORT_AGENT', 'admin']), sendMessageFromAdmin);
-
-router.patch('/mode', authenticateToken, requireRole(['SUPER_ADMIN', 'MANAGER', 'admin']), toggleGlobalWhatsAppMode);
-router.patch('/chats/:chatId/mode', authenticateToken, requireRole(['SUPER_ADMIN', 'MANAGER', 'SUPPORT_AGENT', 'admin']), toggleChatWhatsAppMode);
+router.get('/chats', getWhatsAppChats);
+router.get('/chats/:chatId/messages', getChatMessages);
+router.post('/send', sendWhatsAppMessage);
+router.put('/chats/:chatId/mode', toggleChatMode);
 
 export default router;
