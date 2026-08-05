@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Backend API Server for Explore Wallah Admin Portal & Platform",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
