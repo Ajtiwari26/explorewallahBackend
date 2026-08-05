@@ -8,6 +8,7 @@ import {
   verifyCustomerGoogleAuth,
   refreshCustomerToken,
   updateCustomerProfile,
+  logoutCustomer,
 } from '../controllers/authController';
 import { authenticateToken, requireRole } from '../middleware/authMiddleware';
 
@@ -23,6 +24,7 @@ router.delete('/sessions/:id', authenticateToken, requireRole(['SUPER_ADMIN', 'a
 router.post('/customer/phone', verifyCustomerPhoneAuth);
 router.post('/customer/google', verifyCustomerGoogleAuth);
 router.post('/refresh', refreshCustomerToken);
+router.post('/customer/logout', logoutCustomer);
 router.put('/customer/profile', authenticateToken, updateCustomerProfile);
 
 export default router;

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import AdminSession from '../models/AdminSession';
+import { verifyFirebaseIdToken } from '../config/firebaseAdmin';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -109,70 +110,93 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
   }
 };
 
+const REFRESH_COOKIE_NAME = 'ew_refresh_token';
+const isProd = process.env.NODE_ENV === 'production';
+
+// Frontend and backend live on different domains in production, so the cookie
+// must be SameSite=None; Secure to be sent cross-site. Lax is fine for local dev.
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
+
+/**
+ * Issues the backend session for an already-verified user:
+ * 15m access JWT in the response body, 7d refresh JWT as an HttpOnly cookie.
+ * The refresh token is deliberately NOT included in the JSON body — the
+ * browser must never be able to read it.
+ */
+const issueCustomerSession = (res: Response, user: InstanceType<typeof User>) => {
+  const jwtSecret = process.env.JWT_SECRET || 'explore_wallah_secret_jwt_key_2026';
+  const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'explore_wallah_refresh_secret_key_2026';
+
+  const accessToken = jwt.sign(
+    { userId: user._id, phone: user.phone, email: user.email, role: user.role },
+    jwtSecret,
+    { expiresIn: '15m' }
+  );
+
+  const refreshToken = jwt.sign({ userId: user._id, role: user.role }, jwtRefreshSecret, {
+    expiresIn: '7d',
+  });
+
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions);
+
+  res.json({
+    message: 'Customer authentication successful',
+    accessToken,
+    user: {
+      id: user._id,
+      name: user.name,
+      phone: user.phone || '',
+      email: user.email || '',
+      role: user.role,
+    },
+  });
+};
+
 /**
  * 📱 Customer Phone OTP Verification Endpoint
- * Finds or creates Customer record in MongoDB, generates JWT Access Token (15m) + HttpOnly Refresh Cookie (7d)
+ * Requires a Firebase ID token (Authorization: Bearer <idToken>) proving the
+ * OTP was actually completed. Identity comes ONLY from the verified token.
  */
 export const verifyCustomerPhoneAuth = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { phone, firebaseUid, name } = req.body;
-
-    if (!phone) {
-      res.status(400).json({ error: 'Phone number is required' });
+    let identity;
+    try {
+      identity = await verifyFirebaseIdToken(req.headers.authorization);
+    } catch {
+      res.status(401).json({ error: 'Invalid or missing Firebase ID token' });
       return;
     }
 
-    const cleanPhone = phone.trim();
-    let user = await User.findOne({ $or: [{ phone: cleanPhone }, { firebaseUid }] });
+    if (!identity.phone) {
+      res.status(401).json({ error: 'Firebase token does not contain a verified phone number' });
+      return;
+    }
+
+    let user = await User.findOne({
+      $or: [{ phone: identity.phone }, { firebaseUid: identity.uid }],
+    });
 
     if (!user) {
       user = await User.create({
-        name: name || '',
-        phone: cleanPhone,
-        firebaseUid: firebaseUid || `uid_${Date.now()}`,
+        name: typeof req.body?.name === 'string' ? req.body.name.trim() : '',
+        phone: identity.phone,
+        firebaseUid: identity.uid,
         role: 'CUSTOMER',
         isActive: true,
       });
-    } else if (name && (!user.name || user.name.trim() === '')) {
-      user.name = name;
-      await user.save();
     }
 
-    const jwtSecret = process.env.JWT_SECRET || 'explore_wallah_secret_jwt_key_2026';
-    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'explore_wallah_refresh_secret_key_2026';
+    if (!user.isActive) {
+      res.status(403).json({ error: 'Account is deactivated' });
+      return;
+    }
 
-    const accessToken = jwt.sign(
-      { userId: user._id, phone: user.phone, role: user.role },
-      jwtSecret,
-      { expiresIn: '15m' }
-    );
-
-    const refreshToken = jwt.sign(
-      { userId: user._id, role: user.role },
-      jwtRefreshSecret,
-      { expiresIn: '7d' }
-    );
-
-    // Set HttpOnly, Secure, SameSite cookie for Refresh Token
-    res.cookie('ew_refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json({
-      message: 'Customer phone authentication successful',
-      accessToken,
-      refreshToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        phone: user.phone,
-        email: user.email || '',
-        role: user.role,
-      },
-    });
+    issueCustomerSession(res, user);
   } catch (error) {
     console.error('Error verifying customer phone auth:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -181,71 +205,60 @@ export const verifyCustomerPhoneAuth = async (req: Request, res: Response): Prom
 
 /**
  * 🌐 Customer Google OAuth Verification Endpoint
+ * Requires a Firebase ID token proving the Google sign-in actually happened.
+ * Identity comes ONLY from the verified token.
  */
 export const verifyCustomerGoogleAuth = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, name, phone, firebaseUid } = req.body;
-
-    if (!email) {
-      res.status(400).json({ error: 'Email is required for Google Sign-In' });
+    let identity;
+    try {
+      identity = await verifyFirebaseIdToken(req.headers.authorization);
+    } catch {
+      res.status(401).json({ error: 'Invalid or missing Firebase ID token' });
       return;
     }
 
-    const cleanEmail = email.toLowerCase().trim();
-    let user = await User.findOne({ $or: [{ email: cleanEmail }, { firebaseUid }] });
+    if (!identity.email) {
+      res.status(401).json({ error: 'Firebase token does not contain a verified email' });
+      return;
+    }
+
+    const cleanEmail = identity.email.toLowerCase().trim();
+    let user = await User.findOne({
+      $or: [{ email: cleanEmail }, { firebaseUid: identity.uid }],
+    });
 
     if (!user) {
       user = await User.create({
-        name: name || 'Himalayan Adventurer',
+        name: identity.name || 'Himalayan Adventurer',
         email: cleanEmail,
-        phone: phone || '',
-        firebaseUid: firebaseUid || `g_uid_${Date.now()}`,
+        firebaseUid: identity.uid,
         role: 'CUSTOMER',
         isActive: true,
       });
-    } else if (name && (!user.name || user.name.trim() === '')) {
-      user.name = name;
+    } else if (identity.name && (!user.name || user.name.trim() === '')) {
+      user.name = identity.name;
       await user.save();
     }
 
-    const jwtSecret = process.env.JWT_SECRET || 'explore_wallah_secret_jwt_key_2026';
-    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'explore_wallah_refresh_secret_key_2026';
+    if (!user.isActive) {
+      res.status(403).json({ error: 'Account is deactivated' });
+      return;
+    }
 
-    const accessToken = jwt.sign(
-      { userId: user._id, email: user.email, role: user.role },
-      jwtSecret,
-      { expiresIn: '15m' }
-    );
-
-    const refreshToken = jwt.sign(
-      { userId: user._id, role: user.role },
-      jwtRefreshSecret,
-      { expiresIn: '7d' }
-    );
-
-    res.cookie('ew_refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json({
-      message: 'Customer Google authentication successful',
-      accessToken,
-      refreshToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone || '',
-        role: user.role,
-      },
-    });
+    issueCustomerSession(res, user);
   } catch (error) {
     console.error('Error verifying customer Google auth:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+};
+
+/**
+ * 🚪 Customer Logout — clears the HttpOnly refresh cookie server-side
+ */
+export const logoutCustomer = async (_req: Request, res: Response): Promise<void> => {
+  res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshCookieOptions, maxAge: 0 });
+  res.json({ message: 'Logged out' });
 };
 
 const parseCookies = (cookieHeader?: string): Record<string, string> => {
@@ -265,8 +278,10 @@ const parseCookies = (cookieHeader?: string): Record<string, string> => {
  */
 export const refreshCustomerToken = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Cookie ONLY — a refresh token in the request body would mean the browser
+    // had readable access to it, which defeats the HttpOnly protection.
     const cookies = parseCookies(req.headers.cookie);
-    const refreshToken = req.cookies?.ew_refresh_token || cookies['ew_refresh_token'] || req.body?.refreshToken;
+    const refreshToken = req.cookies?.ew_refresh_token || cookies[REFRESH_COOKIE_NAME];
 
     if (!refreshToken) {
       res.status(401).json({ error: 'Refresh token required' });
@@ -297,6 +312,13 @@ export const refreshCustomerToken = async (req: Request, res: Response): Promise
       res.json({
         message: 'Token refreshed successfully',
         accessToken: newAccessToken,
+        user: {
+          id: user._id,
+          name: user.name,
+          phone: user.phone || '',
+          email: user.email || '',
+          role: user.role,
+        },
       });
     });
   } catch (error) {
@@ -319,7 +341,7 @@ export const updateCustomerProfile = async (req: AuthRequest, res: Response): Pr
     const user = await User.findById(req.user.userId);
 
     if (!user) {
-      res.status(404).json({ error: 'User not found' });
+      res.status(444).json({ error: 'User not found' });
       return;
     }
 

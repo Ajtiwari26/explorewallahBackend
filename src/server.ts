@@ -17,8 +17,16 @@ dotenv.config();
 const app: Express = express();
 const PORT = process.env.PORT || 5050;
 
+// Credentialed requests (HttpOnly refresh cookie) require an explicit origin —
+// browsers reject Access-Control-Allow-Origin: * when credentials are included.
+// Set CORS_ORIGINS on Render, e.g. "https://explorewallah.com,https://www.explorewallah.com"
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: '*',
+  origin: allowedOrigins.length > 0 ? allowedOrigins : true,
   credentials: true
 }));
 
