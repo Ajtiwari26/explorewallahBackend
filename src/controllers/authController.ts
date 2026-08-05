@@ -248,12 +248,25 @@ export const verifyCustomerGoogleAuth = async (req: Request, res: Response): Pro
   }
 };
 
+const parseCookies = (cookieHeader?: string): Record<string, string> => {
+  const list: Record<string, string> = {};
+  if (!cookieHeader) return list;
+  cookieHeader.split(';').forEach((cookie) => {
+    const parts = cookie.split('=');
+    if (parts.length >= 2) {
+      list[parts.shift()!.trim()] = decodeURIComponent(parts.join('='));
+    }
+  });
+  return list;
+};
+
 /**
  * 🔄 Silent Token Refresh Endpoint (verifies Refresh Cookie & issues new Access Token)
  */
 export const refreshCustomerToken = async (req: Request, res: Response): Promise<void> => {
   try {
-    const refreshToken = req.cookies?.ew_refresh_token || req.body?.refreshToken;
+    const cookies = parseCookies(req.headers.cookie);
+    const refreshToken = req.cookies?.ew_refresh_token || cookies['ew_refresh_token'] || req.body?.refreshToken;
 
     if (!refreshToken) {
       res.status(401).json({ error: 'Refresh token required' });
@@ -306,7 +319,7 @@ export const updateCustomerProfile = async (req: AuthRequest, res: Response): Pr
     const user = await User.findById(req.user.userId);
 
     if (!user) {
-      res.status(444).json({ error: 'User not found' });
+      res.status(404).json({ error: 'User not found' });
       return;
     }
 
