@@ -1,0 +1,15 @@
+name: Auto Deploy to Render
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Trigger Render Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        run: |
+          curl -X POST "https://api.render.com/deploy/srv-d9ljrffavr4c7398b1g0?key=Rq5e51KPy30"
